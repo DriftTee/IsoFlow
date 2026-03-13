@@ -278,6 +278,26 @@ function renderTBs() {
   });
 }
 
+// Icon cache for export (maps URL -> data URI)
+const iconCache={};
+
+async function preloadIcons(){
+  if(!view)return;
+  const urls=new Set();
+  Object.values(view.items).forEach(item=>{if(item.icon&&item.icon.url)urls.add(item.icon.url);});
+  const promises=[...urls].map(async url=>{
+    try{
+      const res=await fetch(url);
+      const blob=await res.blob();
+      iconCache[url]=URL.createObjectURL(blob);
+    }catch(e){
+      // CORS blocked - icons still display via img tags, just won't be in canvas export
+      iconCache[url]=null;
+    }
+  });
+  await Promise.allSettled(promises);
+}
+
 function renderNodes() {
   const ly=$('#ly-node');
   const items=Object.values(view.items);
@@ -290,9 +310,11 @@ function renderNodes() {
     if(item.icon&&item.icon.url){
       const iw=PTS.w*0.8;
       const wrap=document.createElement('div'); wrap.className='icon-wrap';
-      const img=document.createElement('img'); img.crossOrigin='anonymous'; img.src=item.icon.url;
+      const img=document.createElement('img');
+      img.src=item.icon.url;
       img.style.width=iw+'px'; img.style.left=(-iw/2)+'px'; img.style.top=(-iw)+'px';
       img.onload=function(){const r=this.naturalHeight/this.naturalWidth;this.style.top=(-iw*r)+'px';};
+      img.onerror=function(){this.style.display='none';};
       wrap.appendChild(img); inner.appendChild(wrap);
     }
     if(item.name){
@@ -364,7 +386,7 @@ function loadJSON(json){
     view=data.views[0];
     $('#proj-title').innerHTML=`${data.title} <span class="version">v${data.version}</span>`;
     $('#dropzone').classList.add('hidden');
-    render(); setTimeout(fitView,400); fitView();
+    render(); preloadIcons(); setTimeout(fitView,400); fitView();
   }catch(e){console.error(e);alert('Error: '+e.message);}
 }
 
@@ -402,10 +424,14 @@ $('#btn-png').onclick=async()=>{
   for(const item of items){
     if(item.icon&&item.icon.url){
       try{
-        const img=new Image(); img.crossOrigin='anonymous';
-        await new Promise((res,rej)=>{img.onload=res;img.onerror=rej;img.src=item.icon.url;});
+        const imgUrl=iconCache[item.icon.url]||item.icon.url;
+        const img=new Image();
+        if(iconCache[item.icon.url]) img.crossOrigin='anonymous';
+        await new Promise((res,rej)=>{img.onload=res;img.onerror=()=>res();img.src=imgUrl;});
+        if(img.naturalWidth>0){
         const pos=tilePx(item.tile,'BOTTOM'), iw=PTS.w*0.8, r=img.naturalHeight/img.naturalWidth, ih=iw*r;
         cx.drawImage(img,pos.x-iw/2-b.x,pos.y-ih-b.y,iw,ih);
+        }
       }catch(e){}
     }
     if(item.name){

@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Isoflow Viewer</title>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root { --bg:#f6faff; --toolbar-bg:#fff; --border:#e0e4ea; --text:#1a1a2e; --text2:#6b7280; --accent:#4f6df5; }
+body { font-family:'Roboto',Arial,sans-serif; background:var(--bg); overflow:hidden; height:100vh; width:100vw; }
+
+#toolbar { position:fixed; top:0; left:0; right:0; height:48px; background:var(--toolbar-bg); border-bottom:1px solid var(--border); display:flex; align-items:center; padding:0 16px; gap:10px; z-index:100; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+#toolbar .title { font-weight:600; font-size:14px; margin-right:auto; }
+#toolbar .version { font-weight:400; font-size:11px; color:var(--text2); margin-left:6px; }
+.tb-btn { height:32px; padding:0 14px; border:1px solid var(--border); border-radius:6px; background:#fff; font-size:12px; font-family:inherit; cursor:pointer; display:flex; align-items:center; gap:5px; color:var(--text); transition:all .15s; }
+.tb-btn:hover { background:#f3f4f6; }
+.tb-btn.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+.tb-btn.primary:hover { background:#3b5bdb; }
+
+#dropzone { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:200; background:rgba(246,250,255,.97); }
+#dropzone.hidden { display:none; }
+#dropzone .inner { text-align:center; padding:50px 70px; border:2px dashed #c0c8d8; border-radius:16px; background:#fff; }
+#dropzone h2 { font-size:20px; margin-bottom:6px; }
+#dropzone p { font-size:13px; color:var(--text2); margin-bottom:16px; }
+#dropzone .or { font-size:12px; color:#999; margin:10px 0; }
+
+#canvas-container { position:fixed; top:48px; left:0; right:0; bottom:0; overflow:hidden; cursor:grab; }
+#canvas-container.panning { cursor:grabbing; }
+#scene { position:absolute; top:50%; left:50%; width:0; height:0; transform-origin:0 0; }
+.scene-layer { position:absolute; width:0; height:0; }
+.grid-bg { position:fixed; top:48px; left:0; right:0; bottom:0; pointer-events:none; }
+
+.iso-wrap { position:absolute; transform-origin:top left; }
+.iso-wrap svg { position:absolute; top:0; left:0; overflow:visible; }
+.iso-node { position:absolute; }
+.iso-node-inner { position:absolute; }
+.icon-wrap { position:absolute; pointer-events:none; }
+.icon-wrap img { position:absolute; pointer-events:none; }
+.label-wrap { position:absolute; pointer-events:none; }
+.label-box { background:#fff; border-radius:6px; padding:4px 10px; box-shadow:0 2px 8px rgba(0,0,0,.12); white-space:nowrap; text-align:center; transform:translateX(-50%); font-size:12px; font-weight:600; line-height:1.3; }
+.tb-content { position:absolute; top:0; left:0; width:100%; height:100%; display:flex; align-items:center; font-weight:bold; white-space:nowrap; }
+
+#zoom-controls { position:fixed; bottom:20px; right:20px; display:flex; flex-direction:column; gap:4px; z-index:50; }
+#zoom-controls button { width:36px; height:36px; border:1px solid var(--border); border-radius:8px; background:#fff; font-size:18px; cursor:pointer; display:flex; align-items:center; justify-content:center; box-shadow:0 1px 4px rgba(0,0,0,.08); }
+#zoom-controls button:hover { background:#f3f4f6; }
+#zoom-label { font-size:11px; text-align:center; color:var(--text2); padding:2px 0; }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <span class="title" id="proj-title">Isoflow Viewer <span class="version" id="proj-version"></span></span>
+  <button class="tb-btn" id="btn-open">Open JSON</button>
+  <button class="tb-btn" id="btn-fit">Fit to view</button>
+  <button class="tb-btn" id="btn-png">Export PNG</button>
+  <button class="tb-btn" id="btn-svg">Export SVG</button>
+</div>
+
+<div id="dropzone">
+  <div class="inner">
+    <h2>Isoflow Viewer</h2>
+    <p>View and export Isoflow diagram JSON exports</p>
+    <button class="tb-btn primary" id="btn-open2">Choose JSON file</button>
+    <div class="or">or drag &amp; drop here</div>
+  </div>
+</div>
+
+<div class="grid-bg" id="grid-bg"></div>
+<div id="canvas-container">
+  <div id="scene">
+    <div class="scene-layer" id="ly-rect"></div>
+    <div class="scene-layer" id="ly-conn"></div>
+    <div class="scene-layer" id="ly-text"></div>
+    <div class="scene-layer" id="ly-node"></div>
+  </div>
+</div>
+
+<div id="zoom-controls">
+  <button id="zin">+</button>
+  <div id="zoom-label">100%</div>
+  <button id="zout">−</button>
+  <button id="zrst" style="font-size:12px;margin-top:4px">1:1</button>
+</div>
+
+<input type="file" id="finput" accept=".json" style="display:none">
+
+<script>
+// ============ ISOFLOW CONSTANTS ============
+const UTS = 100; // UNPROJECTED_TILE_SIZE
+const PTS = { w: UTS * 1.415, h: UTS * 0.819 }; // PROJECTED_TILE_SIZE
+const HW = PTS.w / 2, HH = PTS.h / 2;
+const DEF_COLOR = '#a5b8f3';
+const BG = '#f6faff';
+const CSOFF = { x: 1, y: 1 };
+const ISO_MX = [0.707, -0.409, 0.707, 0.409, 0, -0.816];
+const ISO_MY = [0.707, 0.409, -0.707, 0.409, 0, -0.816];
+
+function tilePx(tile, origin='CENTER') {
+  const p = { x: HW * tile.x - HW * tile.y, y: -(HH * tile.x + HH * tile.y) };
+  if (origin === 'TOP') return { x: p.x, y: p.y - HH };
+  if (origin === 'BOTTOM') return { x: p.x, y: p.y + HH };
+  if (origin === 'LEFT') return { x: p.x - HW, y: p.y };
+  if (origin === 'RIGHT') return { x: p.x + HW, y: p.y };
+  return p;
+}
+
+function isoCSS(o) { return `matrix(${(o === 'Y' ? ISO_MY : ISO_MX).join(',')})`; }
+
+function bbox(tiles, off={x:0,y:0}) {
+  let lx=Infinity,ly=Infinity,hx=-Infinity,hy=-Infinity;
+  tiles.forEach(t => { lx=Math.min(lx,t.x); ly=Math.min(ly,t.y); hx=Math.max(hx,t.x); hy=Math.max(hy,t.y); });
+  return [{x:lx-off.x,y:ly-off.y},{x:hx+off.x,y:ly-off.y},{x:hx+off.x,y:hy+off.y},{x:lx-off.x,y:hy+off.y}];
+}
+
+function darken(hex, amt=1) {
+  hex = hex.replace('#','');
+  if (hex.length===3) hex=hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+  const [r,g,b] = [0,2,4].map(i=>parseInt(hex.slice(i,i+2),16));
+  const f = Math.max(0, 1 - amt * 0.25);
+  return `rgb(${Math.round(r*f)},${Math.round(g*f)},${Math.round(b*f)})`;
+}
+
+// ============ A* PATHFINDER ============
+function astar(from, to, gsize) {
+  const w=gsize.width, h=gsize.height;
+  const open=[{x:from.x,y:from.y,g:0,h:0,f:0,p:null}];
+  const closed=new Set();
+  const k=(x,y)=>`${x},${y}`;
+  const heur=(a,b)=>Math.abs(a.x-b.x)+Math.abs(a.y-b.y);
+  const dirs=[{x:0,y:-1},{x:0,y:1},{x:-1,y:0},{x:1,y:0},{x:-1,y:-1},{x:1,y:-1},{x:-1,y:1},{x:1,y:1}];
+  while(open.length){
+    open.sort((a,b)=>a.f-b.f);
+    const c=open.shift();
+    if(c.x===to.x&&c.y===to.y){const path=[];let n=c;while(n){path.unshift({x:n.x,y:n.y});n=n.p;}return path;}
+    closed.add(k(c.x,c.y));
+    for(const d of dirs){
+      const nx=c.x+d.x,ny=c.y+d.y;
+      if(nx<0||ny<0||nx>=w||ny>=h||closed.has(k(nx,ny)))continue;
+      const diag=d.x!==0&&d.y!==0;
+      const g=c.g+(diag?1.414:1),h2=heur({x:nx,y:ny},to);
+      const ex=open.find(n=>n.x===nx&&n.y===ny);
+      if(ex){if(g<ex.g){ex.g=g;ex.f=g+h2;ex.p=c;}}
+      else open.push({x:nx,y:ny,g,h:h2,f:g+h2,p:c});
+    }
+  }
+  return [from,to];
+}
+
+// ============ STATE ============
+let data=null, view=null, zoom=0.7, scroll={x:0,y:0}, panning=false, lastM={x:0,y:0};
+const $=s=>document.querySelector(s);
+
+// ============ PARSE ============
+function parse(json) {
+  const d = typeof json==='string' ? JSON.parse(json) : json;
+  if (d.physicalTopology) return parseV3(d);
+  return parseCE(d);
+}
+
+function parseV3(d) {
+  const t=d.physicalTopology;
+  const icons={}; (d.icons||[]).forEach(i=>icons[i.id]=i);
+  const defIcon=icons['block']||{id:'block',name:'Block',url:'https://isoflow-public.s3.eu-west-2.amazonaws.com/icons/block.svg',isIsometric:true};
+  const comps={}; (t.components||[]).forEach(c=>comps[c.id]=c);
+  const colors={'__DEFAULT__':DEF_COLOR}; (t.colors||[]).forEach(c=>colors[c.id]=c.value);
+  const views=(t.views||[]).map(v=>{
+    const items={};
+    (v.items||[]).forEach(vi=>{
+      const comp=comps[vi.component];
+      items[vi.id]={id:vi.id,tile:vi.tile,
+        name:comp?comp.name:'',
+        icon:comp?(icons[comp.icon]||(comp.icon==='__DEFAULT__'?defIcon:null)):null,
+        labelHeight:comp?.labelHeight||vi.labelHeight||80};
+    });
+    return {id:v.id,name:v.name,items,rectangles:v.rectangles||[],connectors:v.connectors||[],textBoxes:v.textBoxes||[],colors};
+  });
+  return {title:d.project?.title||'Untitled',version:d.version||'',views};
+}
+
+function parseCE(d) {
+  const icons={}; (d.icons||[]).forEach(i=>icons[i.id]=i);
+  const mitems={}; (d.items||[]).forEach(i=>mitems[i.id]=i);
+  const colors={'__DEFAULT__':DEF_COLOR}; (d.colors||[]).forEach(c=>colors[c.id]=c.value);
+  const views=(d.views||[]).map(v=>{
+    const items={};
+    (v.items||[]).forEach(vi=>{
+      const mi=mitems[vi.id]||mitems[vi.component]||{};
+      items[vi.id]={id:vi.id,tile:vi.tile,name:mi.name||'',icon:icons[mi.icon]||null,labelHeight:vi.labelHeight||mi.labelHeight||80};
+    });
+    return {id:v.id,name:v.name||'Default',items,rectangles:v.rectangles||[],connectors:v.connectors||[],textBoxes:v.textBoxes||[],colors};
+  });
+  return {title:d.title||'Untitled',version:d.version||'',views};
+}
+
+// ============ RENDER ============
+function render() {
+  if(!view)return;
+  ['ly-rect','ly-conn','ly-text','ly-node'].forEach(id=>document.getElementById(id).innerHTML='');
+  renderRects(); renderConns(); renderTBs(); renderNodes(); updateTx();
+}
+
+function renderRects() {
+  const ly=$('#ly-rect');
+  view.rectangles.forEach(r=>{
+    const col=view.colors[r.color]||DEF_COLOR;
+    const bb2=bbox([r.from,r.to]);
+    const origin=bb2[3];
+    const gw=Math.abs(r.from.x-r.to.x)+1, gh=Math.abs(r.from.y-r.to.y)+1;
+    const pw=gw*UTS, ph=gh*UTS;
+    const pos=tilePx(origin,'LEFT');
+    const w=document.createElement('div'); w.className='iso-wrap';
+    w.style.cssText=`left:${pos.x}px;top:${pos.y}px;width:${pw}px;height:${ph}px;transform:${isoCSS()}`;
+    const s=`<svg viewBox="0 0 ${pw} ${ph}" width="${pw}" height="${ph}"><rect width="${pw}" height="${ph}" fill="${col}" rx="22" stroke="${darken(col,2)}" stroke-width="1"/></svg>`;
+    w.innerHTML=s; ly.appendChild(w);
+  });
+}
+
+function renderConns() {
+  const ly=$('#ly-conn');
+  view.connectors.forEach(cn=>{
+    const col=view.colors[cn.color]||DEF_COLOR;
+    const anchors=cn.anchors||[]; if(anchors.length<2)return;
+    const ats=anchors.map(a=>{
+      if(a.ref.item){const vi=view.items[a.ref.item];return vi?vi.tile:{x:0,y:0};}
+      if(a.ref.tile)return a.ref.tile;return{x:0,y:0};
+    });
+    const sbb=bbox(ats,CSOFF);
+    let lx=Infinity,ly2=Infinity,hx=-Infinity,hy2=-Infinity;
+    sbb.forEach(t=>{lx=Math.min(lx,t.x);ly2=Math.min(ly2,t.y);hx=Math.max(hx,t.x);hy2=Math.max(hy2,t.y);});
+    const rf={x:hx,y:hy2},rt={x:lx,y:ly2};
+    const sw=hx-lx+1,sh=hy2-ly2+1;
+    const norm=ats.map(t=>({x:rf.x-t.x,y:rf.y-t.y}));
+    let tiles=[];
+    for(let i=1;i<norm.length;i++) tiles=tiles.concat(astar(norm[i-1],norm[i],{width:sw,height:sh}));
+    if(!tiles.length)return;
+    const bb2=bbox([rf,rt]),origin=bb2[3];
+    const gw=Math.abs(rf.x-rt.x)+1,gh=Math.abs(rf.y-rt.y)+1;
+    const pw=gw*UTS,ph=gh*UTS;
+    const pos=tilePx(origin,'LEFT');
+    const doff=UTS/2;
+    const pts=tiles.map(t=>`${t.x*UTS+doff},${t.y*UTS+doff}`).join(' ');
+    const cw=(UTS/100)*(cn.width||10);
+    const st=cn.style||'SOLID';
+    let da='none';
+    if(st==='DASHED')da=`${cw*2},${cw*2}`;
+    if(st==='DOTTED')da=`0,${cw*1.8}`;
+    const daAttr=da==='none'?'':'stroke-dasharray="'+da+'"';
+    const w=document.createElement('div'); w.className='iso-wrap';
+    w.style.cssText=`left:${pos.x}px;top:${pos.y}px;width:${pw}px;height:${ph}px;transform:${isoCSS()}`;
+    w.innerHTML=`<svg viewBox="0 0 ${pw} ${ph}" width="${pw}" height="${ph}" style="transform:scale(-1,1)">
+      <polyline points="${pts}" stroke="white" stroke-width="${cw*1.4}" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.7" fill="none" ${daAttr}/>
+      <polyline points="${pts}" stroke="${darken(col,1)}" stroke-width="${cw}" stroke-linecap="round" stroke-linejoin="round" fill="none" ${daAttr}/>
+    </svg>`;
+    ly.appendChild(w);
+  });
+}
+
+function renderTBs() {
+  const ly=$('#ly-text');
+  view.textBoxes.forEach(tb=>{
+    const orient=tb.orientation||'X';
+    const fs=(tb.fontSize||0.6)*UTS;
+    const cv=document.createElement('canvas'),cx=cv.getContext('2d');
+    cx.font=`bold ${fs}px Roboto,Arial,sans-serif`;
+    const tw=cx.measureText(tb.content||'Text').width;
+    const px=0.2*UTS;
+    const wt=(tw+px*2)/UTS-0.8;
+    const to={x:tb.tile.x+Math.max(wt,1),y:tb.tile.y};
+    const bb2=bbox([tb.tile,to]),origin=bb2[3];
+    const gw=Math.abs(tb.tile.x-to.x)+1;
+    const pw=gw*UTS,ph=UTS;
+    const pos=tilePx(origin,orient==='Y'?'TOP':'LEFT');
+    const w=document.createElement('div'); w.className='iso-wrap';
+    w.style.cssText=`left:${pos.x}px;top:${pos.y}px;width:${pw}px;height:${ph}px;transform:${isoCSS(orient)}`;
+    w.innerHTML=`<div class="tb-content" style="font-size:${fs}px;padding-left:${px}px">${tb.content||''}</div>`;
+    ly.appendChild(w);
+  });
+}
+
+function renderNodes() {
+  const ly=$('#ly-node');
+  const items=Object.values(view.items);
+  items.sort((a,b)=>(a.tile.x+a.tile.y)-(b.tile.x+b.tile.y));
+  items.forEach((item,i)=>{
+    const pos=tilePx(item.tile,'BOTTOM');
+    const n=document.createElement('div'); n.className='iso-node'; n.style.zIndex=i;
+    const inner=document.createElement('div'); inner.className='iso-node-inner';
+    inner.style.left=pos.x+'px'; inner.style.top=pos.y+'px';
+    if(item.icon&&item.icon.url){
+      const iw=PTS.w*0.8;
+      const wrap=document.createElement('div'); wrap.className='icon-wrap';
+      const img=document.createElement('img'); img.crossOrigin='anonymous'; img.src=item.icon.url;
+      img.style.width=iw+'px'; img.style.left=(-iw/2)+'px'; img.style.top=(-iw)+'px';
+      img.onload=function(){const r=this.naturalHeight/this.naturalWidth;this.style.top=(-iw*r)+'px';};
+      wrap.appendChild(img); inner.appendChild(wrap);
+    }
+    if(item.name){
+      const lw=document.createElement('div'); lw.className='label-wrap';
+      lw.style.bottom=(HH)+'px';
+      const lb=document.createElement('div'); lb.className='label-box';
+      lb.style.marginBottom=(item.labelHeight||80)+'px'; lb.textContent=item.name;
+      lw.appendChild(lb); inner.appendChild(lw);
+    }
+    n.appendChild(inner); ly.appendChild(n);
+  });
+}
+
+// ============ GRID ============
+const gridSVG=`data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 141.38828 163.26061"><g stroke="#000" stroke-opacity=".15" stroke-width="1"><polygon points="70.69436 122.44546 .00022 81.63018 70.69392 40.81515 141.38806 81.63043 70.69436 122.44546" fill="none"/><line x1="70.69414" y1="40.81503" x2="141.38784"/><line y1="0" x2="70.69414" y2="40.81528"/><line x1="70.69414" y1="122.44559" x2=".00044" y2="163.26061"/><line x1="141.38828" y1="163.26061" x2="70.69414" y2="122.44533"/></g></svg>')}`;
+
+function updateGrid() {
+  const g=$('#grid-bg'), cc=$('#canvas-container'), r=cc.getBoundingClientRect();
+  const tw=PTS.w*zoom, th=PTS.h*zoom;
+  g.style.backgroundImage=`url("${gridSVG}")`;
+  g.style.backgroundSize=`${tw}px ${th*2}px`;
+  g.style.backgroundPosition=`${r.width/2+scroll.x+tw/2}px ${(r.height)/2+scroll.y}px`;
+}
+
+function updateTx() {
+  $('#scene').style.transform=`translate(${scroll.x}px,${scroll.y}px) scale(${zoom})`;
+  updateGrid();
+  $('#zoom-label').textContent=Math.round(zoom*100)+'%';
+}
+
+function fitView() {
+  if(!view)return;
+  const all=[];
+  Object.values(view.items).forEach(i=>all.push(i.tile));
+  view.rectangles.forEach(r=>{all.push(r.from);all.push(r.to);});
+  view.textBoxes.forEach(t=>all.push(t.tile));
+  if(!all.length)return;
+  const corners=bbox(all,{x:3,y:3});
+  const cpos=corners.map(c=>tilePx(c));
+  let mnX=Infinity,mnY=Infinity,mxX=-Infinity,mxY=-Infinity;
+  cpos.forEach(p=>{mnX=Math.min(mnX,p.x);mnY=Math.min(mnY,p.y);mxX=Math.max(mxX,p.x);mxY=Math.max(mxY,p.y);});
+  const cw=mxX-mnX,ch=mxY-mnY,cc=$('#canvas-container'),vw=cc.clientWidth,vh=cc.clientHeight;
+  zoom=Math.min(vw/cw,vh/ch,1); zoom=Math.max(0.15,zoom);
+  scroll.x=-((mnX+mxX)/2)*zoom; scroll.y=-((mnY+mxY)/2)*zoom;
+  updateTx();
+}
+
+// ============ PAN/ZOOM ============
+const cc=$('#canvas-container');
+cc.onmousedown=e=>{panning=true;lastM={x:e.clientX,y:e.clientY};cc.classList.add('panning');};
+window.onmousemove=e=>{if(!panning)return;scroll.x+=e.clientX-lastM.x;scroll.y+=e.clientY-lastM.y;lastM={x:e.clientX,y:e.clientY};updateTx();};
+window.onmouseup=()=>{panning=false;cc.classList.remove('panning');};
+cc.addEventListener('wheel',e=>{
+  e.preventDefault();
+  const d=e.deltaY>0?-0.1:0.1, nz=Math.max(0.1,Math.min(2,zoom+d));
+  const r=cc.getBoundingClientRect(), mx=e.clientX-r.left-r.width/2, my=e.clientY-r.top-r.height/2;
+  const s=nz/zoom; scroll.x=mx-s*(mx-scroll.x); scroll.y=my-s*(my-scroll.y); zoom=nz; updateTx();
+},{passive:false});
+$('#zin').onclick=()=>{zoom=Math.min(2,zoom+0.2);updateTx();};
+$('#zout').onclick=()=>{zoom=Math.max(0.1,zoom-0.2);updateTx();};
+$('#zrst').onclick=()=>{zoom=1;updateTx();};
+$('#btn-fit').onclick=fitView;
+
+// ============ FILE ============
+function loadJSON(json){
+  try{
+    data=parse(json);
+    if(!data.views.length){alert('No views found.');return;}
+    view=data.views[0];
+    $('#proj-title').innerHTML=`${data.title} <span class="version">v${data.version}</span>`;
+    $('#dropzone').classList.add('hidden');
+    render(); setTimeout(fitView,400); fitView();
+  }catch(e){console.error(e);alert('Error: '+e.message);}
+}
+
+function handleFile(f){const r=new FileReader();r.onload=e=>loadJSON(e.target.result);r.readAsText(f);}
+$('#finput').onchange=e=>{if(e.target.files[0])handleFile(e.target.files[0]);};
+$('#btn-open').onclick=$('#btn-open2').onclick=()=>$('#finput').click();
+document.addEventListener('dragover',e=>e.preventDefault());
+document.addEventListener('drop',e=>{e.preventDefault();if(e.dataTransfer.files[0])handleFile(e.dataTransfer.files[0]);});
+
+// ============ EXPORT ============
+function getBounds(){
+  const all=[];
+  Object.values(view.items).forEach(i=>{const p=tilePx(i.tile);all.push({x:p.x-120,y:p.y-220},{x:p.x+120,y:p.y+100});});
+  view.rectangles.forEach(r=>{[r.from,r.to].forEach(t=>{const p=tilePx(t);all.push({x:p.x-120,y:p.y-120},{x:p.x+120,y:p.y+120});});});
+  view.textBoxes.forEach(t=>{const p=tilePx(t.tile);all.push({x:p.x-100,y:p.y-50},{x:p.x+200,y:p.y+50});});
+  let mnX=Infinity,mnY=Infinity,mxX=-Infinity,mxY=-Infinity;
+  all.forEach(p=>{mnX=Math.min(mnX,p.x);mnY=Math.min(mnY,p.y);mxX=Math.max(mxX,p.x);mxY=Math.max(mxY,p.y);});
+  const pad=80;
+  return {x:mnX-pad,y:mnY-pad,w:mxX-mnX+pad*2,h:mxY-mnY+pad*2};
+}
+
+$('#btn-png').onclick=async()=>{
+  if(!view)return;
+  const b=getBounds(), cv=document.createElement('canvas'), sc=2;
+  cv.width=b.w*sc; cv.height=b.h*sc;
+  const cx=cv.getContext('2d'); cx.scale(sc,sc);
+  cx.fillStyle=BG; cx.fillRect(0,0,b.w,b.h);
+
+  // Rectangles
+  // (Rectangles use isometric projection which is hard to replicate in canvas. Skipping for simplicity.)
+
+  // Nodes
+  const items=Object.values(view.items);
+  items.sort((a,b2)=>(a.tile.x+a.tile.y)-(b2.tile.x+b2.tile.y));
+  for(const item of items){
+    if(item.icon&&item.icon.url){
+      try{
+        const img=new Image(); img.crossOrigin='anonymous';
+        await new Promise((res,rej)=>{img.onload=res;img.onerror=rej;img.src=item.icon.url;});
+        const pos=tilePx(item.tile,'BOTTOM'), iw=PTS.w*0.8, r=img.naturalHeight/img.naturalWidth, ih=iw*r;
+        cx.drawImage(img,pos.x-iw/2-b.x,pos.y-ih-b.y,iw,ih);
+      }catch(e){}
+    }
+    if(item.name){
+      const pos=tilePx(item.tile,'BOTTOM');
+      cx.font='600 12px Roboto,Arial,sans-serif';
+      const tw=cx.measureText(item.name).width;
+      const lx=pos.x-b.x, ly2=pos.y-HH-(item.labelHeight||80)-b.y;
+      cx.fillStyle='#fff'; cx.shadowColor='rgba(0,0,0,.12)'; cx.shadowBlur=8;
+      cx.beginPath(); cx.roundRect(lx-tw/2-10,ly2-8,tw+20,24,6); cx.fill(); cx.shadowBlur=0;
+      cx.fillStyle='#1a1a2e'; cx.textAlign='center'; cx.fillText(item.name,lx,ly2+8);
+    }
+  }
+  const link=document.createElement('a');
+  link.download=`${data.title||'diagram'}.png`;
+  link.href=cv.toDataURL('image/png'); link.click();
+};
+
+$('#btn-svg').onclick=()=>{
+  if(!view)return;
+  const b=getBounds(), ns='http://www.w3.org/2000/svg';
+  const svg=document.createElementNS(ns,'svg');
+  svg.setAttribute('xmlns',ns); svg.setAttribute('width',b.w); svg.setAttribute('height',b.h);
+  svg.setAttribute('viewBox',`0 0 ${b.w} ${b.h}`);
+  const bg=document.createElementNS(ns,'rect'); bg.setAttribute('width',b.w); bg.setAttribute('height',b.h); bg.setAttribute('fill',BG); svg.appendChild(bg);
+  const g=document.createElementNS(ns,'g'); g.setAttribute('transform',`translate(${-b.x},${-b.y})`);
+  const items=Object.values(view.items);
+  items.sort((a,b2)=>(a.tile.x+a.tile.y)-(b2.tile.x+b2.tile.y));
+  for(const item of items){
+    if(item.icon&&item.icon.url){
+      const pos=tilePx(item.tile,'BOTTOM'), iw=PTS.w*0.8;
+      const img=document.createElementNS(ns,'image');
+      img.setAttribute('href',item.icon.url); img.setAttribute('width',iw);
+      img.setAttribute('x',pos.x-iw/2); img.setAttribute('y',pos.y-iw); g.appendChild(img);
+    }
+    if(item.name){
+      const pos=tilePx(item.tile,'BOTTOM');
+      const t=document.createElementNS(ns,'text');
+      t.setAttribute('x',pos.x); t.setAttribute('y',pos.y-HH-(item.labelHeight||80));
+      t.setAttribute('text-anchor','middle'); t.setAttribute('font-family','Roboto,Arial,sans-serif');
+      t.setAttribute('font-size','12'); t.setAttribute('font-weight','600'); t.setAttribute('fill','#1a1a2e');
+      t.textContent=item.name; g.appendChild(t);
+    }
+  }
+  svg.appendChild(g);
+  const blob=new Blob([new XMLSerializer().serializeToString(svg)],{type:'image/svg+xml'});
+  const link=document.createElement('a'); link.download=`${data.title||'diagram'}.svg`;
+  link.href=URL.createObjectURL(blob); link.click();
+};
+
+// ============ INIT ============
+updateGrid();
+</script>
+</body>
+</html>

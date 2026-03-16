@@ -37,7 +37,7 @@ body { font-family:'Roboto',Arial,sans-serif; background:var(--bg); overflow:hid
 .iso-node-inner { position:absolute; }
 .icon-wrap { position:absolute; pointer-events:none; }
 .icon-wrap img { position:absolute; pointer-events:none; }
-.label-box { position:absolute; display:inline-block; background:rgba(0,0,0,0.75); color:#fff; border:1px solid rgba(255,255,255,0.2); border-radius:8px; padding:4px 10px; white-space:nowrap; font-size:11px; font-weight:600; line-height:1.3; transform:translate(-50%, -100%); pointer-events:none; }
+.label-box { position:absolute; display:inline-block; background:#fff; color:#222; border:1px solid #bbb; border-radius:8px; padding:4px 10px; white-space:nowrap; font-size:11px; font-weight:600; line-height:1.3; transform:translate(-50%, -100%); pointer-events:none; }
 .tb-content { position:absolute; top:0; left:0; width:100%; height:100%; display:flex; align-items:center; font-weight:bold; white-space:nowrap; color:#fff; text-shadow: 0 1px 4px rgba(0,0,0,0.7), 0 0 12px rgba(0,0,0,0.5); }
 
 #zoom-controls { position:fixed; bottom:20px; right:20px; display:flex; flex-direction:column; gap:4px; z-index:50; }
@@ -333,7 +333,7 @@ function renderNodes() {
       const ln=document.createElementNS(svgNs,'line');
       ln.setAttribute('x1',ds/2); ln.setAttribute('y1','0');
       ln.setAttribute('x2',ds/2); ln.setAttribute('y2',lh);
-      ln.setAttribute('stroke','rgba(255,255,255,0.6)');
+      ln.setAttribute('stroke','rgba(0,0,0,0.5)');
       ln.setAttribute('stroke-width',ds);
       ln.setAttribute('stroke-dasharray',`0,${ds*2}`);
       ln.setAttribute('stroke-linecap','round');
@@ -460,13 +460,13 @@ $('#btn-png').onclick=async()=>{
       cx.font='600 11px Roboto,Arial,sans-serif';
       const tw=cx.measureText(item.name).width;
       const lx=pos.x-b.x, ly2=pos.y-HH-(item.labelHeight||80)-b.y;
-      cx.fillStyle='rgba(30,30,50,0.85)'; cx.shadowColor='rgba(0,0,0,.3)'; cx.shadowBlur=6;
-      cx.beginPath(); cx.roundRect(lx-tw/2-10,ly2-8,tw+20,24,6); cx.fill(); cx.shadowBlur=0;
-      cx.fillStyle='#fff'; cx.textAlign='center'; cx.fillText(item.name,lx,ly2+8);
-      // Leader line
-      cx.strokeStyle='rgba(255,255,255,0.4)'; cx.lineWidth=1.5; cx.setLineDash([4,3]);
-      cx.beginPath(); cx.moveTo(lx,ly2+16); cx.lineTo(lx,pos.y-HH/2-b.y); cx.stroke();
-      cx.setLineDash([]);
+      cx.fillStyle='#fff'; cx.strokeStyle='#bbb'; cx.lineWidth=1;
+      cx.beginPath(); cx.roundRect(lx-tw/2-10,ly2-8,tw+20,24,6); cx.fill(); cx.stroke();
+      cx.fillStyle='#222'; cx.textAlign='center'; cx.fillText(item.name,lx,ly2+8);
+      // Leader dots
+      cx.strokeStyle='rgba(0,0,0,0.5)'; cx.lineWidth=2; cx.setLineDash([0,5]); cx.lineCap='round';
+      cx.beginPath(); cx.moveTo(lx,ly2+16); cx.lineTo(lx,pos.y-HH-b.y); cx.stroke();
+      cx.setLineDash([]); cx.lineCap='butt';
     }
   }
   const link=document.createElement('a');
@@ -496,7 +496,7 @@ $('#btn-svg').onclick=()=>{
       const t=document.createElementNS(ns,'text');
       t.setAttribute('x',pos.x); t.setAttribute('y',pos.y-HH-(item.labelHeight||80));
       t.setAttribute('text-anchor','middle'); t.setAttribute('font-family','Roboto,Arial,sans-serif');
-      t.setAttribute('font-size','11'); t.setAttribute('font-weight','600'); t.setAttribute('fill','#ffffff');
+      t.setAttribute('font-size','11'); t.setAttribute('font-weight','600'); t.setAttribute('fill','#222');
       t.textContent=item.name; g.appendChild(t);
     }
   }

@@ -37,9 +37,9 @@ body { font-family:'Roboto',Arial,sans-serif; background:var(--bg); overflow:hid
 .iso-node-inner { position:absolute; }
 .icon-wrap { position:absolute; pointer-events:none; }
 .icon-wrap img { position:absolute; pointer-events:none; }
-.label-wrap { position:absolute; pointer-events:none; }
-.label-box { background:rgba(0,0,0,0.7); color:#fff; border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:4px 10px; white-space:nowrap; text-align:center; font-size:11px; font-weight:600; line-height:1.3; position:absolute; transform:translateX(-50%); left:0; }
-.leader-line { position:absolute; left:-1px; width:0; border-left:none; }
+.label-anchor { position:absolute; }
+.label-root { position:absolute; width:250px; }
+.label-box { position:absolute; display:inline-block; background:rgba(0,0,0,0.75); color:#fff; border:1px solid rgba(255,255,255,0.2); border-radius:8px; padding:4px 10px; white-space:nowrap; font-size:11px; font-weight:600; line-height:1.3; transform-origin:bottom center; transform:translate(-50%, -100%); }
 .tb-content { position:absolute; top:0; left:0; width:100%; height:100%; display:flex; align-items:center; font-weight:bold; white-space:nowrap; color:#fff; text-shadow: 0 1px 4px rgba(0,0,0,0.7), 0 0 12px rgba(0,0,0,0.5); }
 
 #zoom-controls { position:fixed; bottom:20px; right:20px; display:flex; flex-direction:column; gap:4px; z-index:50; }
@@ -320,19 +320,19 @@ function renderNodes() {
     }
     if(item.name){
       const lh=item.labelHeight||80;
-      const iconTop=HH; // distance from BOTTOM origin to roughly top of icon area
-      const lw=document.createElement('div'); lw.className='label-wrap';
-      // Label pill - positioned above the icon
-      const lb=document.createElement('div'); lb.className='label-box';
-      lb.style.bottom=(iconTop+lh)+'px';
-      lb.textContent=item.name;
-      lw.appendChild(lb);
-      // Dotted leader line (SVG, matching isoflow's Label.tsx)
+      // Matches Node.tsx: wrapper at bottom: PROJECTED_TILE_SIZE.height / 2
+      const anchor=document.createElement('div');
+      anchor.className='label-anchor';
+      anchor.style.bottom=(HH)+'px';
+      // Matches Label.tsx: root container
+      const root=document.createElement('div');
+      root.className='label-root';
+      // Matches Label.tsx: SVG leader line at top: -labelHeight
       const ds=3,svgNs='http://www.w3.org/2000/svg';
       const svg=document.createElementNS(svgNs,'svg');
       svg.setAttribute('viewBox',`0 0 ${ds} ${lh}`);
       svg.setAttribute('width',ds); svg.setAttribute('height',lh);
-      svg.style.cssText=`position:absolute;bottom:${iconTop}px;left:${-ds/2}px;overflow:visible`;
+      svg.style.cssText=`position:absolute;top:${-lh}px;left:${-ds/2}px;overflow:visible`;
       const ln=document.createElementNS(svgNs,'line');
       ln.setAttribute('x1',ds/2); ln.setAttribute('y1','0');
       ln.setAttribute('x2',ds/2); ln.setAttribute('y2',lh);
@@ -340,8 +340,15 @@ function renderNodes() {
       ln.setAttribute('stroke-width',ds);
       ln.setAttribute('stroke-dasharray',`0,${ds*2}`);
       ln.setAttribute('stroke-linecap','round');
-      svg.appendChild(ln); lw.appendChild(svg);
-      inner.appendChild(lw);
+      svg.appendChild(ln); root.appendChild(svg);
+      // Matches Label.tsx: label box at top: -labelHeight, transform: translate(-50%, -100%)
+      const lb=document.createElement('div');
+      lb.className='label-box';
+      lb.style.top=(-lh)+'px';
+      lb.textContent=item.name;
+      root.appendChild(lb);
+      anchor.appendChild(root);
+      inner.appendChild(anchor);
     }
     n.appendChild(inner); ly.appendChild(n);
   });
